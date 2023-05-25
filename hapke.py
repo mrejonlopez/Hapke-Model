@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.interpolate import interp1d
 
 
 # SINGLE SCATTERING ALBEDO FUNCTION
@@ -48,8 +49,28 @@ def singlescatteringalbedo(n, k, wavelength, D, internalScattering=False):
     return w
 
 
-def hapke_model(parameters, wav, angles, n_range, k_range):
+def opticalconstants(T, max_wavelength=5.1, min_wavelength=0.35, crystallinity=True):
+    if crystallinity:
+        data = np.loadtxt('./Optical Constants/Crystalline_' + str(T) + '.txt')
+    else:
+        data = np.loadtxt('./Optical Constants/Amorphous_' + str(T) + '.txt')
 
+    wavelength = [row[0] for row in data]
+    n = [row[1] for row in data]
+    k = [row[2] for row in data]
+
+    indices = [i for i in range(len(wavelength)) if min_wavelength <= wavelength[i] <= max_wavelength]
+
+    # Extract wavelength, n, and k values within desired range
+    wavelength_range = [wavelength[i] for i in indices]
+    n_range = [n[i] for i in indices]
+    k_range = [k[i] for i in indices]
+
+    opt = {'wav': wavelength_range, 'n': n_range, 'k': k_range}
+
+    return opt
+
+def hapke_model(parameters, wav, angles, n_range, k_range):
     """
     :param parameters: to be optimized, in order filling factor, grain size and surface roughness
     :param wav: wavelength array
@@ -68,9 +89,6 @@ def hapke_model(parameters, wav, angles, n_range, k_range):
 
     B_S0 = 0.53
     b = 0.2
-    B_C0 = 0.35
-
-    transport_mean_free_path = 33 * 10 ** (-6)
 
     K = porosityparameter(phi)
 
@@ -81,12 +99,11 @@ def hapke_model(parameters, wav, angles, n_range, k_range):
     [mu_0e, mu_e, S] = shadowingfunction(inc, eme, psi, theta_bar)
 
     w = singlescatteringalbedo(n_range, k_range, wav, D)
-    B_CB = cboe(B_C0, transport_mean_free_path, wav, phase, K)
 
     r = []
     for i in range(len(wav)):
         r.append(K * w[i] / (4 * np.pi) * mu_0e / (mu_0e + mu_e) * (
-                p * B_SH + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * B_CB[i] * S)
+                p * B_SH + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * S)
 
     IF = np.array(r) * np.pi
 
@@ -237,6 +254,21 @@ def shadowingfunction(i, e, psi, thetabar):
         S = (mu_e / eta(e)) * (mu_0 / eta(i)) * (xi / (1 - fpsi(psi) + fpsi(psi) * xi * (mu_0 / eta(e))))
 
     return mu_0e, mu_e, S
+
+
+def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_range, k_range):
+    IF_hapke = hapke_model(parameters, hapke_wav, angles, n_range, k_range)['IF']
+
+    wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), np.array(hapke_wav).max())
+
+    interp_func = interp1d(hapke_wav, IF_hapke, kind='linear')
+
+    # Interpolate y2 values at x_new
+    interpolated_hapke = interp_func(wav_new)
+
+    difference = interpolated_hapke - measured_IF
+
+    return difference
 
 
 def H(w, x):

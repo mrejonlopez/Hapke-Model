@@ -2,73 +2,64 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 
-# SINGLE SCATTERING ALBEDO FUNCTION
+###############################################################################
+###############################################################################
+###############################################################################
+####################### MAIN HAPKE FUNCTIONS ##################################
+###############################################################################
+###############################################################################
+###############################################################################
 
-def singlescatteringalbedo(n, k, wavelength, D, internalScattering=False):
+def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
     """
-    Generalized equivalent-slab model (Hapke 2012; Section 6.5)
-    n & k: optical constants
-    wavelength: wavelength in microns
-    D: particle mean size
-    internalScattering: boolean
-
+    :param parameters: to be optimized, in order filling factor, grain size and surface roughness
+    :param wav: wavelength array
+    :param angles: in order incidence, emergence and phase
+    :param n_range: n array
+    :param k_range: k array
+    :return:
     """
 
-    if not internalScattering:
-        s = 0
-    elif internalScattering:
-        s = 10000  # cm^(-1)
-        s = 1 / ((1 / s) * 10 ** (-2))  # m^(-1)
+    # Unpack the parameters
+    # Assuming you have parameters p1, p2, p3, etc.
+    phi, D, theta_bar, mass_fraction = parameters
+    eme, inc, phase = angles
+    # Calculate the modeled spectrum using Hapke model equations
 
-    R_0 = np.empty((len(n)))
-    Se = np.empty((len(n)))
-    Si = np.empty((len(n)))
-    alpha = np.empty((len(n)))
-    Dmodif = np.empty((len(n)))
-    r_i = np.empty((len(n)))
-    Theta = np.empty((len(n)))
-    w = np.empty((len(n)))
+    psi = phasetoazimuth(phase, eme, inc)
 
-    for i in range(len(n)):
-        R_0[i] = ((n[i] - 1) ** 2 + k[i] ** 2) / ((n[i] + 1) ** 2 + k[i] ** 2)
+    w_c = singlescatteringalbedo(n_c, k_c, wav, D)
+    w_am = singlescatteringalbedo(n_am, k_am, wav, D)
 
-        Se[i] = 0.0587 + 0.8543 * R_0[i] + 0.0870 * R_0[i] ** 2
-        Si[i] = 1 - (0.9413 - 0.8543 * R_0[i] + 0.0870 * R_0[i] ** 2) / n[i]
+    b = 0.2
+    c = hockey_stick(b)
+    p = phase_function(b, c, phase)
 
-        # absorption coefficient multiplied by a factor pi
-        alpha[i] = (4 * np.pi * k[i]) / (wavelength[i] * 10 ** (-6))
+    R0_c = fresnel_coefficient(n_c, k_c)
+    R0_am = fresnel_coefficient(n_am, k_am)
 
-        Dmodif[i] = np.real((2 / 3) * (n[i] ** 2 - (1 / n[i]) * (n[i] ** 2 - 1 + 0j) ** (3 / 2)) * D)
-        r_i[i] = (1 - np.sqrt(alpha[i] / (alpha[i] + s))) / (1 + np.sqrt(alpha[i] / (alpha[i] + s)))
-        Theta[i] = (r_i[i] + np.exp(-np.sqrt(alpha[i] * (alpha[i] + s)) * Dmodif[i])) / (
-                1 + r_i[i] * np.exp(-np.sqrt(alpha[i] * (alpha[i] + s)) * Dmodif[i]))
+    B_S0 = shoe_amp_mix(mass_fraction, wav, wav, p, p, R0_c, R0_am)
 
-        # calculation of the single scattering albedo
-        w[i] = Se[i] + (1 - Se[i]) * ((1 - Si[i]) / (1 - Si[i] * Theta[i])) * Theta[i]
+    K = porosityparameter(phi)
 
-    return w
+    B_SH = shoe(B_S0, phi, phase)
 
+    [mu_0e, mu_e, S] = shadowingfunction(inc, eme, psi, theta_bar)
 
-def opticalconstants(T, max_wavelength=5.1, min_wavelength=0.35, crystallinity=True):
-    if crystallinity:
-        data = np.loadtxt('./Optical Constants/Crystalline_' + str(T) + '.txt')
-    else:
-        data = np.loadtxt('./Optical Constants/Amorphous_' + str(T) + '.txt')
+    w = singlescatteringalbedomixed(mass_fraction, w_c, w_am)
 
-    wavelength = [row[0] for row in data]
-    n = [row[1] for row in data]
-    k = [row[2] for row in data]
+    r = np.empty(len(wav))
 
-    indices = [i for i in range(len(wavelength)) if min_wavelength <= wavelength[i] <= max_wavelength]
+    for i in range(len(wav)):
+        r[i] = (K * w[i] / (4 * np.pi) * mu_0e / (mu_0e + mu_e) * (
+                p * B_SH[i] + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * S)
 
-    # Extract wavelength, n, and k values within desired range
-    wavelength_range = [wavelength[i] for i in indices]
-    n_range = [n[i] for i in indices]
-    k_range = [k[i] for i in indices]
+    IF = r * np.pi
 
-    opt = {'wav': wavelength_range, 'n': n_range, 'k': k_range}
+    output = {'r': r, 'IF': IF, 'w': w, 'p': p}
 
-    return opt
+    return output
+
 
 def hapke_model(parameters, wav, angles, n_range, k_range):
     """
@@ -112,44 +103,107 @@ def hapke_model(parameters, wav, angles, n_range, k_range):
     return output
 
 
-def singlescatteringalbedomixed(massfraction_am, w_c, w_am):
+def hapke_model2(parameters, wav, angles, n, k):
+    # FUNCTION TO CHECK THE BEHAVIOR OF B_S0 DEPENDENCY WITH LAMBDA
     """
-    :param massfraction_am: [0,1]
-    :param w_c: array, function of wavelength
-    :param w_am: array, function of wavelength
-    :return: array, function of wavelength
+    :param parameters: to be optimized, in order filling factor, grain size and surface roughness
+    :param wav: wavelength array
+    :param angles: in order incidence, emergence and phase
+    :param n_range: n array
+    :param k_range: k array
+    :return:
+    """
+    # Unpack the parameters
+    # Assuming you have parameters p1, p2, p3, etc.
+    phi, D, theta_bar = parameters
+    eme, inc, phase = angles
+    # Calculate the modeled spectrum using Hapke model equations
+
+    psi = phasetoazimuth(phase, eme, inc)
+
+    b = 0.2
+
+    K = porosityparameter(phi)
+    c = hockey_stick(b)
+
+    p = phase_function(b, c, phase)
+    w = singlescatteringalbedo(n, k, wav, D)
+
+    R_0 = np.empty(len(wav))
+    B_S0 = np.empty(len(wav))
+
+    for i in range(len(B_S0)):
+        R_0[i] = ((n[i] - 1) ** 2 + k[i] ** 2) / ((n[i] + 1) ** 2 + k[i] ** 2)
+
+        B_S0[i] = R_0[i] / (w[i] * phase)
+
+    B_SH = shoe(B_S0, phi, phase)
+
+    [mu_0e, mu_e, S] = shadowingfunction(inc, eme, psi, theta_bar)
+
+    r = []
+    for i in range(len(wav)):
+        r.append(K * w[i] / (4 * np.pi) * mu_0e / (mu_0e + mu_e) * (
+                p * B_SH[i] + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * S)
+
+    IF = np.array(r) * np.pi
+
+    output = {'r': r, 'IF': IF, 'w': w, 'p': p}
+
+    return output
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+########################## HAPKE FUNCTIONS ####################################
+###############################################################################
+###############################################################################
+###############################################################################
+
+
+def singlescatteringalbedo(n, k, wavelength, D, internalScattering=False):
+    """
+    Generalized equivalent-slab model (Hapke 2012; Section 6.5)
+    n & k: optical constants
+    wavelength: wavelength in microns
+    D: particle mean size
+    internalScattering: boolean
+
     """
 
-    w_mix = massfraction_am * np.array(w_am) + (1 - massfraction_am) * np.array(w_c)
+    if not internalScattering:
+        s = 0
+    elif internalScattering:
+        s = 10000  # cm^(-1)
+        s = 1 / ((1 / s) * 10 ** (-2))  # m^(-1)
 
-    return w_mix
+    R_0 = fresnel_coefficient(n, k)
 
+    Se = np.empty((len(n)))
+    Si = np.empty((len(n)))
+    alpha = np.empty((len(n)))
+    Dmodif = np.empty((len(n)))
+    r_i = np.empty((len(n)))
+    Theta = np.empty((len(n)))
+    w = np.empty((len(n)))
 
-def phasefunctionmixed(massfraction_am, w_c, w_am, phase_c, phase_am):
-    """
-    :param massfraction_am: [0,1]
-    :param w_c: array, function of wavelength
-    :param w_am: array, function of wavelength
-    :param phase_c: double
-    :param phase_am: double
-    :return: phase function now becomes function of wavelength
-    """
-    phase_mix = np.empty((len(w_c)))
-    for i in range(len(w_c)):
-        phase_mix[i] = (massfraction_am * w_am[i] * phase_am + (1 - massfraction_am) * w_c[i] * phase_c) / (
-                massfraction_am * w_am[i] + (1 - massfraction_am) * w_c[i])
+    for i in range(len(n)):
+        Se[i] = 0.0587 + 0.8543 * R_0[i] + 0.0870 * R_0[i] ** 2
+        Si[i] = 1 - (0.9413 - 0.8543 * R_0[i] + 0.0870 * R_0[i] ** 2) / n[i]
 
-    return phase_mix
+        # absorption coefficient multiplied by a factor pi
+        alpha[i] = (4 * np.pi * k[i]) / (wavelength[i] * 10 ** (-6))
 
+        Dmodif[i] = np.real((2 / 3) * (n[i] ** 2 - (1 / n[i]) * (n[i] ** 2 - 1 + 0j) ** (3 / 2)) * D)
+        r_i[i] = (1 - np.sqrt(alpha[i] / (alpha[i] + s))) / (1 + np.sqrt(alpha[i] / (alpha[i] + s)))
+        Theta[i] = (r_i[i] + np.exp(-np.sqrt(alpha[i] * (alpha[i] + s)) * Dmodif[i])) / (
+                1 + r_i[i] * np.exp(-np.sqrt(alpha[i] * (alpha[i] + s)) * Dmodif[i]))
 
-def shoe_amp_mix(massfraction_am, w_c, w_am, phase_c, phase_am, S_c, S_am):
-    b_s0 = np.empty(len(w_c))
+        # calculation of the single scattering albedo
+        w[i] = Se[i] + (1 - Se[i]) * ((1 - Si[i]) / (1 - Si[i] * Theta[i])) * Theta[i]
 
-    for i in range(len(w_c)):
-        b_s0[i] = (massfraction_am * S_am[i] + (1 - massfraction_am) * S_c[i]) / (
-                massfraction_am * w_am[i] * phase_am + (1 - massfraction_am) * w_c[i] * phase_c)
-
-    return b_s0
+    return w
 
 
 def hockey_stick(b):
@@ -256,21 +310,6 @@ def shadowingfunction(i, e, psi, thetabar):
     return mu_0e, mu_e, S
 
 
-def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_range, k_range):
-    IF_hapke = hapke_model(parameters, hapke_wav, angles, n_range, k_range)['IF']
-
-    wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), np.array(hapke_wav).max())
-
-    interp_func = interp1d(hapke_wav, IF_hapke, kind='linear')
-
-    # Interpolate y2 values at x_new
-    interpolated_hapke = interp_func(wav_new)
-
-    difference = interpolated_hapke - measured_IF
-
-    return difference
-
-
 def H(w, x):
     """
     :param w: single scattering albedo
@@ -314,12 +353,141 @@ def porosityparameter(phi):
 
 def shoe(B_S0, phi, g):
     h_s = 3 * porosityparameter(phi) * phi / 8
-    B_S = (1 + np.tan(g / 2) / h_s)
+    B_S = (1 + np.tan(g / 2) / h_s) ** (-1)
 
-    return 1 + B_S0 / B_S
+    return np.array(1 + B_S0 * B_S)
 
 
-print("listo")
+def fresnel_coefficient(n, k):
+    R0 = np.empty(len(n))
+
+    for i in range(len(n)):
+        R0[i] = ((n[i] - 1) ** 2 + k[i] ** 2) / ((n[i] + 1) ** 2 + k[i] ** 2)
+
+    return R0
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+###################### AUXILIARY FUNCTIONS ####################################
+###############################################################################
+###############################################################################
+###############################################################################
+
+
+def opticalconstants(T, max_wavelength=5.1, min_wavelength=0.35, crystallinity=True):
+    if crystallinity:
+        data = np.loadtxt('./Optical Constants/Crystalline_' + str(T) + '.txt')
+    else:
+        data = np.loadtxt('./Optical Constants/Amorphous_' + str(T) + '.txt')
+
+    wavelength = [row[0] for row in data]
+    n = [row[1] for row in data]
+    k = [row[2] for row in data]
+
+    indices = [i for i in range(len(wavelength)) if min_wavelength <= wavelength[i] <= max_wavelength]
+
+    # Extract wavelength, n, and k values within desired range
+    wavelength_range = [wavelength[i] for i in indices]
+    n_range = [n[i] for i in indices]
+    k_range = [k[i] for i in indices]
+
+    opt = {'wav': wavelength_range, 'n': n_range, 'k': k_range}
+
+    return opt
+
+
+def inter_optical_constants(wav_c, wav_am, n_c, k_c):
+
+    #wav_new = np.clip(np.array(wav_c), np.array(wav_am).min(), np.array(wav_am).max())
+
+    interp_func_n = interp1d(wav_c, n_c, kind='linear', bounds_error=False, fill_value='extrapolate')
+    interp_func_k = interp1d(wav_c, k_c, kind='linear', bounds_error=False, fill_value='extrapolate')
+
+    # Interpolate y2 values at x_new
+    interpolated_n_c = interp_func_n(wav_am)
+    interpolated_k_c = interp_func_k(wav_am)
+
+    opt = {'wav': np.array(wav_am), 'n': interpolated_n_c, 'k': interpolated_k_c}
+
+    return opt
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+####################### INTIMATE MIXED FUNCTIONS ##############################
+###############################################################################
+###############################################################################
+###############################################################################
+
+
+def singlescatteringalbedomixed(massfraction_am, w_c, w_am):
+    """
+    :param massfraction_am: [0,1]
+    :param w_c: array, function of wavelength
+    :param w_am: array, function of wavelength
+    :return: array, function of wavelength
+    """
+
+    w_mix = massfraction_am * np.array(w_am) + (1 - massfraction_am) * np.array(w_c)
+
+    return w_mix
+
+
+# PHASE FUNCTION MIXED WITH WAVELENGTH DEPENDENCE; BEFORE IT WAS JUST A SCALAR
+def phasefunctionmixed(massfraction_am, w_c, w_am, phase_c, phase_am):
+    """
+    :param massfraction_am: [0,1]
+    :param w_c: array, function of wavelength
+    :param w_am: array, function of wavelength
+    :param phase_c: double
+    :param phase_am: double
+    :return: phase function now becomes function of wavelength
+    """
+
+    phase_mix = np.empty((len(w_c)))
+    for i in range(len(w_c)):
+        phase_mix[i] = (massfraction_am * w_am[i] * phase_am + (1 - massfraction_am) * w_c[i] * phase_c) / (
+                massfraction_am * w_am[i] + (1 - massfraction_am) * w_c[i])
+
+    return phase_mix
+
+
+def shoe_amp_mix(massfraction_am, w_c, w_am, phase_c, phase_am, S_c, S_am):
+    b_s0 = np.empty(len(w_c))
+
+    for i in range(len(w_c)):
+        b_s0[i] = (massfraction_am * S_am[i] + (1 - massfraction_am) * S_c[i]) / (
+                massfraction_am * w_am[i] * phase_am + (1 - massfraction_am) * w_c[i] * phase_c)
+
+    return b_s0
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+############################# FIT FUNCTIONS ###################################
+###############################################################################
+###############################################################################
+###############################################################################
+
+
+def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_range, k_range):
+
+    IF_hapke = hapke_model(parameters, hapke_wav, angles, n_range, k_range)['IF']
+
+    wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), np.array(hapke_wav).max())
+
+    interp_func = interp1d(hapke_wav, IF_hapke, kind='linear')
+
+    # Interpolate y2 values at x_new
+    interpolated_hapke = interp_func(wav_new)
+
+    difference = interpolated_hapke - measured_IF
+
+    return difference
 
 
 class icymoons:

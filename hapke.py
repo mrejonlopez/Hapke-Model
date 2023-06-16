@@ -1,6 +1,11 @@
 import numpy as np
 from scipy.interpolate import interp1d
 
+density_cr = 0.931
+density_am = 0.94
+
+
+# DECIDED TO TAKE THE SAME DENSITY AS THE DIFFERENCE IS VERY SMALL
 
 ###############################################################################
 ###############################################################################
@@ -15,8 +20,8 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
     :param parameters: to be optimized, in order filling factor, grain size and surface roughness
     :param wav: wavelength array
     :param angles: in order incidence, emergence and phase
-    :param n_range: n array
-    :param k_range: k array
+    :param n_c & n_am: n array of crystalline and amorphous ice
+    :param k_c & k_am: k array of crystalline and amorphous ice
     :return:
     """
 
@@ -399,8 +404,7 @@ def opticalconstants(T, max_wavelength=5.1, min_wavelength=0.35, crystallinity=T
 
 
 def inter_optical_constants(wav_c, wav_am, n_c, k_c):
-
-    #wav_new = np.clip(np.array(wav_c), np.array(wav_am).min(), np.array(wav_am).max())
+    # wav_new = np.clip(np.array(wav_c), np.array(wav_am).min(), np.array(wav_am).max())
 
     interp_func_n = interp1d(wav_c, n_c, kind='linear', bounds_error=False, fill_value='extrapolate')
     interp_func_k = interp1d(wav_c, k_c, kind='linear', bounds_error=False, fill_value='extrapolate')
@@ -431,7 +435,7 @@ def singlescatteringalbedomixed(massfraction_am, w_c, w_am):
     :return: array, function of wavelength
     """
 
-    w_mix = massfraction_am * np.array(w_am) + (1 - massfraction_am) * np.array(w_c)
+    w_mix = (massfraction_am * np.array(w_am) + (1 - massfraction_am) * np.array(w_c))
 
     return w_mix
 
@@ -477,6 +481,20 @@ def shoe_amp_mix(massfraction_am, w_c, w_am, phase_c, phase_am, S_c, S_am):
 def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_range, k_range):
 
     IF_hapke = hapke_model(parameters, hapke_wav, angles, n_range, k_range)['IF']
+
+    wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), np.array(hapke_wav).max())
+
+    interp_func = interp1d(hapke_wav, IF_hapke, kind='linear')
+
+    # Interpolate y2 values at x_new
+    interpolated_hapke = interp_func(wav_new)
+
+    difference = interpolated_hapke - measured_IF
+
+    return difference
+
+def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav, n1, k1, n2, k2):
+    IF_hapke = hapke_model_mixed(parameters, hapke_wav, angles, n1, k1, n2, k2)['IF']
 
     wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), np.array(hapke_wav).max())
 

@@ -1,37 +1,38 @@
-import os
+import numpy as np
+import hapke
+import matplotlib.pyplot as plt
+from scipy import optimize
 
-# Define input file name and output directory
-input_file = 'Mastrapa.txt'
-output_dir = 'Optical Constants'
+T = 100
 
-# Create output directory if it doesn't exist
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+n = hapke.opticalconstants(T)['n']
+k = hapke.opticalconstants(T)['k']
+wav = hapke.opticalconstants(T)['wav']
 
-# Define possible values for ice state and temperature
-ice_states = ['Crystalline']
-temperatures = [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150]
+n2 = hapke.opticalconstants(T, crystallinity=False)['n']
+k2 = hapke.opticalconstants(T, crystallinity=False)['k']
+wav2 = hapke.opticalconstants(T, crystallinity=False)['wav']
 
-# Loop over ice states and temperatures
-for ice_state in ice_states:
-    for temperature in temperatures:
+int_opt = hapke.inter_optical_constants(wav, wav2, n, k)
 
-        # Define output file name
-        output_file = f'{ice_state}_{temperature}.txt'
+wav = int_opt['wav']
+n = int_opt['n']
+k = int_opt['k']
 
-        # Open output file for writing
-        with open(os.path.join(output_dir, output_file), 'w') as f_out:
+phi, D, b = [0.35, 10 ** (-5), np.deg2rad(15)]
+eme, inc, phase = [np.deg2rad(40), np.deg2rad(30), np.deg2rad(70)]
+parameters = [phi, D, b]
+angles = [eme, inc, phase]
 
-            # Open input file for reading
-            with open(input_file, 'r') as f_in:
+b = [0.1, 0.25, 0.5, 0.75, 1]
 
-                # Loop over lines in input file
-                for line in f_in:
 
-                    # Check if current line matches ice state and temperature
-                    if line.startswith(ice_state) and int(line[12:15]) == temperature:
-                        # Extract columns 3-5 (wave, n, k) from the line
-                        cols = line.split()[2:]
 
-                        # Write extracted columns to output file
-                        f_out.write('\t'.join(cols) + '\n')
+fig, ax = plt.subplots()
+for i in range(len(b)):
+    ax.plot(wav, hapke.hapke_model([phi,D,b[i]], wav, angles, n, k)['IF'], label='b=' + str(b[i]))
+ax.set_xlabel('Wavelength (um)')
+ax.set_ylabel('I/F')
+ax.set_title(f'')
+ax.legend()
+plt.show()

@@ -27,7 +27,10 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
 
     # Unpack the parameters
     # Assuming you have parameters p1, p2, p3, etc.
-    phi, D, theta_bar, mass_fraction = parameters
+    phi, D, b, mass_fraction = parameters
+
+    theta_bar = np.deg2rad(20)
+
     eme, inc, phase = angles
     # Calculate the modeled spectrum using Hapke model equations
 
@@ -36,7 +39,7 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
     w_c = singlescatteringalbedo(n_c, k_c, wav, D)
     w_am = singlescatteringalbedo(n_am, k_am, wav, D)
 
-    b = 0.2
+    #b = 0.2
     c = hockey_stick(b)
     p = phase_function(b, c, phase)
 
@@ -64,6 +67,60 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
     output = {'r': r, 'IF': IF, 'w': w, 'p': p}
 
     return output
+
+def hapke_model_mixed_no_shoe(parameters, wav, angles, n_c, k_c, n_am, k_am):
+    """
+    :param parameters: to be optimized, in order filling factor, grain size and surface roughness
+    :param wav: wavelength array
+    :param angles: in order incidence, emergence and phase
+    :param n_c & n_am: n array of crystalline and amorphous ice
+    :param k_c & k_am: k array of crystalline and amorphous ice
+    :return:
+    """
+
+    # Unpack the parameters
+    # Assuming you have parameters p1, p2, p3, etc.
+    phi, D, mass_fraction = parameters
+
+    theta_bar = np.deg2rad(20)
+
+    eme, inc, phase = angles
+    # Calculate the modeled spectrum using Hapke model equations
+
+    psi = phasetoazimuth(phase, eme, inc)
+
+    w_c = singlescatteringalbedo(n_c, k_c, wav, D)
+    w_am = singlescatteringalbedo(n_am, k_am, wav, D)
+
+    b = 0.2
+    c = hockey_stick(b)
+    p = phase_function(b, c, phase)
+
+    #R0_c = fresnel_coefficient(n_c, k_c)
+    #R0_am = fresnel_coefficient(n_am, k_am)
+
+    #B_S0 = shoe_amp_mix(mass_fraction, wav, wav, p, p, R0_c, R0_am)
+
+    K = porosityparameter(phi)
+
+    #B_SH = shoe(B_S0, phi, phase)
+
+    [mu_0e, mu_e, S] = shadowingfunction(inc, eme, psi, theta_bar)
+
+    w = singlescatteringalbedomixed(mass_fraction, w_c, w_am)
+
+    r = np.empty(len(wav))
+
+    for i in range(len(wav)):
+        r[i] = (K * w[i] / (4 * np.pi) * mu_0e / (mu_0e + mu_e) * (
+                p + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * S)
+
+    IF = r * np.pi
+
+    output = {'r': r, 'IF': IF, 'w': w, 'p': p}
+
+    return output
+
 
 
 def hapke_model(parameters, wav, angles, n_range, k_range):
@@ -494,7 +551,7 @@ def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_ra
     return difference
 
 def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav, n1, k1, n2, k2):
-    IF_hapke = hapke_model_mixed(parameters, hapke_wav, angles, n1, k1, n2, k2)['IF']
+    IF_hapke = hapke_model_mixed_no_shoe(parameters, hapke_wav, angles, n1, k1, n2, k2)['IF']
 
     wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), np.array(hapke_wav).max())
 

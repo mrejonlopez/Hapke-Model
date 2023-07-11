@@ -15,7 +15,7 @@ density_am = 0.94
 ###############################################################################
 ###############################################################################
 
-def hapke_model_mixed(parameters, theta_bar, wav, angles, n_c, k_c, n_am, k_am):
+def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
     """
     :param parameters: to be optimized, in order filling factor, grain size and surface roughness
     :param wav: wavelength array
@@ -28,7 +28,7 @@ def hapke_model_mixed(parameters, theta_bar, wav, angles, n_c, k_c, n_am, k_am):
     # Unpack the parameters
     # Assuming you have parameters p1, p2, p3, etc.
     phi, D, b, mass_fraction = parameters
-
+    theta_bar = 0.0
     eme, inc, phase = angles
     # Calculate the modeled spectrum using Hapke model equations
 
@@ -130,16 +130,18 @@ def hapke_model(parameters, wav, angles, n_range, k_range):
     :param k_range: k array
     :return:
     """
+
     # Unpack the parameters
     # Assuming you have parameters p1, p2, p3, etc.
-    phi, D, b = parameters
+    phi, D = parameters
     eme, inc, phase = angles
     # Calculate the modeled spectrum using Hapke model equations
-    theta_bar = 0
+    theta_bar = np.deg2rad(0.0)
+    #phi = 0.51
     psi = phasetoazimuth(phase, eme, inc)
 
     B_S0 = 0.5
-    #b = 0.2
+    b = 0.2
 
     K = porosityparameter(phi)
 
@@ -444,22 +446,41 @@ def fresnel_coefficient(n, k):
 ###############################################################################
 
 
-def opticalconstants(T, max_wavelength=5.1, min_wavelength=0.35, crystallinity=True):
+def opticalconstants(T, max_wavelength=5.1, min_wavelength=0.35, crystallinity=True, sensitivity = 1):
     if crystallinity:
         data = np.loadtxt('./Optical Constants/Crystalline_' + str(T) + '.txt')
     else:
         data = np.loadtxt('./Optical Constants/Amorphous_' + str(T) + '.txt')
 
-    wavelength = [row[0] for row in data]
-    n = [row[1] for row in data]
-    k = [row[2] for row in data]
+    #wavelength = [row[0] for row in data]
+    #n = [row[1] for row in data]
+    #k = [row[2] for row in data]
 
-    indices = [i for i in range(len(wavelength)) if min_wavelength <= wavelength[i] <= max_wavelength]
+    wavelength = data[:,0]
+    n = data[:,1]
+    k = data[:,2]
+
+    #indices = [i for i in range(len(wavelength)) if min_wavelength <= wavelength[i] <= max_wavelength]
+
+    #wavelength_range = []
+    #n_range = []
+    #k_range = []
+    #for i in indices:
+    #    if i % sensitivity == 0:
+    #        wavelength_range.append(wavelength[i])
+    #        n_range.append(n[i])
+    #        k_range.append(k[i])
+
+    min_i = np.argmax(wavelength > min_wavelength)
+    max_i = np.argmin(wavelength < max_wavelength)
+    wavelength_range = wavelength[min_i:max_i:sensitivity]
+    n_range = n[min_i:max_i:sensitivity]
+    k_range = k[min_i:max_i:sensitivity]
 
     # Extract wavelength, n, and k values within desired range
-    wavelength_range = [wavelength[i] for i in indices]
-    n_range = [n[i] for i in indices]
-    k_range = [k[i] for i in indices]
+    #wavelength_range = [wavelength[i] for i in indices]
+    #n_range = [n[i] for i in indices]
+    #k_range = [k[i] for i in indices]
 
     opt = {'wav': wavelength_range, 'n': n_range, 'k': k_range}
 
@@ -544,8 +565,8 @@ def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_ra
 
     IF_hapke = hapke_model(parameters, hapke_wav, angles, n_range, k_range)['IF']
 
-    interp_func_1 = interp1d(hapke_wav, IF_hapke, kind='cubic', bounds_error=False)
-    interp_func_2 = interp1d(measured_wav, measured_IF, kind='cubic', bounds_error=False)
+    interp_func_1 = interp1d(hapke_wav, IF_hapke, bounds_error=False)
+    interp_func_2 = interp1d(measured_wav, measured_IF, bounds_error=False)
 
     wav_new = []
 
@@ -556,7 +577,7 @@ def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_ra
     interpolated_hapke = interp_func_1(wav_new)
     interpolated_lab = interp_func_2(wav_new)
 
-    difference = interpolated_hapke - interpolated_lab
+    difference = (interpolated_hapke - interpolated_lab)
 
     return difference
 
@@ -591,19 +612,22 @@ def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_ra
 #    return difference
 
 def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav, n1, k1, n2, k2, max_w=0):
+
     IF_hapke = hapke_model_mixed_no_shoe(parameters, hapke_wav, angles, n1, k1, n2, k2)['IF']
 
-    if max_w == 0:
-        wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), np.array(hapke_wav).max())
-    else:
-        wav_new = np.clip(np.array(measured_wav), np.array(hapke_wav).min(), max_w)
+    interp_func_1 = interp1d(hapke_wav, IF_hapke, kind='cubic', bounds_error=False)
+    interp_func_2 = interp1d(measured_wav, measured_IF, kind='cubic', bounds_error=False)
 
-    interp_func = interp1d(hapke_wav, IF_hapke, kind='linear')
+    wav_new = []
 
-    # Interpolate y2 values at x_new
-    interpolated_hapke = interp_func(wav_new)
+    for i in range(len(measured_wav)):
+        if max(measured_wav[0], hapke_wav[0]) < measured_wav[i] < min(measured_wav[-1], hapke_wav[-1], max_w):
+            wav_new.append(measured_wav[i])
 
-    difference = interpolated_hapke - measured_IF
+    interpolated_hapke = interp_func_1(wav_new)
+    interpolated_lab = interp_func_2(wav_new)
+
+    difference = (interpolated_hapke - interpolated_lab) / interpolated_lab
 
     return difference
 

@@ -15,8 +15,9 @@ density_am = 0.7
 ###############################################################################
 ###############################################################################
 
-def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
+def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am, body='0'):
     """
+    :param body: icy moon to be considered
     :param parameters: to be optimized, in order filling factor, grain size and surface roughness
     :param wav: wavelength array
     :param angles: in order incidence, emergence and phase
@@ -25,10 +26,31 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
     :return:
     """
 
+    if body == 'MIMAS':
+        theta_bar = MIMAS.theta_bar
+        b = MIMAS.b
+    elif body == 'ENCELADUS':
+        theta_bar = ENCELADUS.theta_bar
+        b = ENCELADUS.b
+    elif body == 'RHEA':
+        theta_bar = RHEA.theta_bar
+        b = RHEA.b
+    elif body == 'IAPETUS':
+        theta_bar = IAPETUS.theta_bar
+        b = IAPETUS.b
+    elif body == 'TETHYS':
+        theta_bar = TETHYS.theta_bar
+        b = TETHYS.b
+    elif body == 'DIONE':
+        theta_bar = DIONE.theta_bar
+        b = DIONE.b
+    else:
+        print('NO BODY IDENTIFIED, ARBITRARY VALUES OF b AND ROUGHNESS')
+        theta_bar = np.deg2rad(5)
+        b = 0.2
     # Unpack the parameters
     # Assuming you have parameters p1, p2, p3, etc.
     phi, D, mass_fraction = parameters
-    theta_bar = np.deg2rad(20)
     eme, inc, phase = angles
     # Calculate the modeled spectrum using Hapke model equations
     psi = phasetoazimuth(phase, eme, inc)
@@ -36,7 +58,6 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am):
     w_c = singlescatteringalbedo(n_c, k_c, wav, D)
     w_am = singlescatteringalbedo(n_am, k_am, wav, D)
 
-    b = 0.2
     c = hockey_stick(b)
     p = phase_function(b, c, phase)
 
@@ -487,8 +508,8 @@ def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav
 
 
 def cost_function_mixed_no_weight(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,
-                                  max_w=6):
-    IF_hapke = hapke_model_mixed(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am)['IF']
+                                  max_w=6, body='0'):
+    IF_hapke = hapke_model_mixed(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am, body)['IF']
 
     interp_func_1 = interp1d(hapke_wav, IF_hapke, bounds_error=False)
     interp_func_2 = interp1d(measured_wav, measured_IF, bounds_error=False)
@@ -548,18 +569,19 @@ def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav
 
 
 class icymoons:
-    def __init__(self, B_C0, freepath, B_S0, b):
+    def __init__(self, B_C0, freepath, B_S0, b, theta_bar):
         self.b_co = B_C0
         self.freepath = freepath
         self.B_S0 = B_S0
         self.b = b
+        self.theta_bar = theta_bar
 
 
 # DEFINITION OF THE ATTRIBUTES OF THE ICY MOONS - BOOK ENCELADUS AND THE ICY MOONS: SURFACE PROPERTIES
 
-MIMAS = icymoons(0.31, 19 * 10 ** (-6), 0.53, 0.175)
-ENCELADUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.1)
-TETHYS = icymoons(0.32, 109 * 10 ** (-6), 0.53, 0.25)
-DIONE = icymoons(0.32, 11 * 10 ** (-6), 0.53, 0.2)  # UNDETERMINED
-RHEA = icymoons(0.33, 31 * 10 ** (-6), 0.53, 0.45)  # AVERAGE OF 3 VALUES
-IAPETUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.2)  # UNDETERMINED
+MIMAS = icymoons(0.31, 19 * 10 ** (-6), 0.53, 0.175, np.deg2rad(30))
+ENCELADUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.1, np.deg2rad(21))
+TETHYS = icymoons(0.32, 109 * 10 ** (-6), 0.53, 0.25, np.deg2rad(23))
+DIONE = icymoons(0.32, 11 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20))  # UNDETERMINED
+RHEA = icymoons(0.33, 31 * 10 ** (-6), 0.53, 0.45, np.deg2rad(15))  # AVERAGE OF 3 VALUES
+IAPETUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20))  # UNDETERMINED

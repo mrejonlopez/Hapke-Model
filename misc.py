@@ -2,37 +2,36 @@ import numpy as np
 import hapke
 import matplotlib.pyplot as plt
 from scipy import optimize
+from matplotlib.patches import Polygon
 
-T = 100
+def plot_shaded_square(vertices):
+    # Create a new figure and axis
+    fig, ax = plt.subplots()
 
-n = hapke.opticalconstants(T)['n']
-k = hapke.opticalconstants(T)['k']
-wav = hapke.opticalconstants(T)['wav']
+    # Create a Polygon patch using the vertices
+    square_patch = Polygon(vertices, closed=True, facecolor='yellow', alpha=0.4)
 
-n2 = hapke.opticalconstants(T, crystallinity=False)['n']
-k2 = hapke.opticalconstants(T, crystallinity=False)['k']
-wav2 = hapke.opticalconstants(T, crystallinity=False)['wav']
+    # Add the square patch to the plot
+    ax.add_patch(square_patch)
 
-int_opt = hapke.inter_optical_constants(wav, wav2, n, k)
+    # Set the aspect ratio to be equal to have a square plot
+    ax.set_aspect('equal')
 
-wav = int_opt['wav']
-n = int_opt['n']
-k = int_opt['k']
+    # Set the axis limits based on the range of x and y values
+    x, y = zip(*vertices)
+    ax.set_xlim(min(x) - 1, max(x) + 1)
+    ax.set_ylim(min(y) - 1, max(y) + 1)
 
-phi, D, b = [0.35, 10 ** (-5), np.deg2rad(15)]
-eme, inc, phase = [np.deg2rad(40), np.deg2rad(30), np.deg2rad(70)]
-parameters = [phi, D, b]
-angles = [eme, inc, phase]
+    # Label the axes
+    ax.set_xlabel('X-axis')
+    ax.set_ylabel('Y-axis')
 
-b = [0.1, 0.25, 0.5, 0.75, 1]
+    # Set the title of the plot
+    ax.set_title('Plotting a Shaded Square')
 
+    # Show the plot
+    plt.show()
 
-
-fig, ax = plt.subplots()
-for i in range(len(b)):
-    ax.plot(wav, hapke.hapke_model([phi,D,b[i]], wav, angles, n, k)['IF'], label='b=' + str(b[i]))
-ax.set_xlabel('Wavelength (um)')
-ax.set_ylabel('I/F')
-ax.set_title(f'')
-ax.legend()
-plt.show()
+# Replace the 'vertices' variable with your four data points (x, y)
+vertices = [(0, 1), (0, 5), (5, 5), (5, 0)]
+plot_shaded_square(vertices)

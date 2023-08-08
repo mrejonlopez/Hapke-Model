@@ -1,5 +1,11 @@
 import numpy as np
+from matplotlib.collections import PatchCollection
 from scipy.interpolate import interp1d
+import os
+from pyvims import VIMS
+import shutil
+from matplotlib.patches import Polygon
+from pyvims.misc import MAPS
 
 density_cr = 0.931
 density_am = 0.7
@@ -54,7 +60,6 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am, body='0'):
     eme, inc, phase = angles
     # Calculate the modeled spectrum using Hapke model equations
     psi = phasetoazimuth(phase, eme, inc)
-
     w_c = singlescatteringalbedo(n_c, k_c, wav, D)
     w_am = singlescatteringalbedo(n_am, k_am, wav, D)
 
@@ -362,6 +367,53 @@ def fresnel_coefficient(n, k):
 ###############################################################################
 ###############################################################################
 
+def print_error_correlation(optimized_parameters):
+    # FUNCTION THAT PRINTS THE CALCULATED ERRORS AND COVARIANCE MATRIX OF A FIT
+
+    optimized_values = optimized_parameters.x
+    # Retrieve the covariance matrix
+    cov_matrix = np.linalg.inv(optimized_parameters.jac.T @ optimized_parameters.jac)
+
+    # Calculate the standard errors of the optimized parameters
+    parameter_errors = np.sqrt(np.diag(cov_matrix))
+
+    # Print the optimized parameter values and their errors
+    for i, value in enumerate(optimized_values):
+        print(f"Parameter {i + 1}: {value:} +/- {parameter_errors[i]:.6f}")
+
+    # Calculate correlation matrix
+    correlation_matrix = cov_matrix / np.outer(parameter_errors, parameter_errors)
+
+    print("Correlation matrix:")
+    print(correlation_matrix)
+
+    return 0
+
+
+# DOWNLOAD THE CUBE AND ALLOCATE IT TO THE RIGHT FOLDER
+
+def retrieve_cube(cube_id):
+    directory = 'C:/Users/USUARIO/Desktop/MSc Thesis/Phase A - Data Analysis/Data/'
+    cube = VIMS(cube_id, root=directory)
+
+    origin = directory + cube.fname
+    destination = directory + cube.target_name + '/' + str(cube.flyby)
+
+    # If the folder does not exist, create it
+
+    if not os.path.exists(destination):
+        os.mkdir(destination)
+        print("New folder created")
+
+    if os.path.exists(destination + '/' + cube.fname):
+        print("Existing Cube")
+    else:
+        shutil.move(origin, destination)
+
+    print("Cube saved in: " + destination)
+
+    return cube
+
 
 def opticalconstants(T, max_wavelength=5.1, min_wavelength=0.35, crystallinity=True, sensitivity=1):
     if crystallinity:
@@ -569,19 +621,63 @@ def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav
 
 
 class icymoons:
-    def __init__(self, B_C0, freepath, B_S0, b, theta_bar):
+    def __init__(self, B_C0, freepath, B_S0, b, theta_bar, T):
         self.b_co = B_C0
         self.freepath = freepath
         self.B_S0 = B_S0
         self.b = b
         self.theta_bar = theta_bar
+        self.T = T
 
 
 # DEFINITION OF THE ATTRIBUTES OF THE ICY MOONS - BOOK ENCELADUS AND THE ICY MOONS: SURFACE PROPERTIES
 
-MIMAS = icymoons(0.31, 19 * 10 ** (-6), 0.53, 0.175, np.deg2rad(30))
-ENCELADUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.1, np.deg2rad(21))
-TETHYS = icymoons(0.32, 109 * 10 ** (-6), 0.53, 0.25, np.deg2rad(23))
-DIONE = icymoons(0.32, 11 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20))  # UNDETERMINED
-RHEA = icymoons(0.33, 31 * 10 ** (-6), 0.53, 0.45, np.deg2rad(15))  # AVERAGE OF 3 VALUES
-IAPETUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20))  # UNDETERMINED
+MIMAS = icymoons(0.31, 19 * 10 ** (-6), 0.53, 0.175, np.deg2rad(30), 80)
+ENCELADUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.1, np.deg2rad(21), 80)
+TETHYS = icymoons(0.32, 109 * 10 ** (-6), 0.53, 0.25, np.deg2rad(23), 60)
+DIONE = icymoons(0.32, 11 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20), 100)  # UNDETERMINED
+RHEA = icymoons(0.33, 31 * 10 ** (-6), 0.53, 0.45, np.deg2rad(15), 120)  # AVERAGE OF 3 VALUES
+IAPETUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20), 120)  # UNDETERMINED
+
+
+###############################################################################
+###############################################################################
+###############################################################################
+############################# PLOTTING FUNCTIONS ###################################
+###############################################################################
+###############################################################################
+###############################################################################
+
+def plot_pixel_equi(wav,cube, pixel_loc, background=False):
+    pixel = {}
+
+    patches = []
+    for i in range(len(pixel_loc)):
+        pixel[i] = cube @ pixel_loc[i]
+
+        corners_lon = pixel[i].corners.lonlat[0, :]
+        corners_lat = pixel[i].corners.lonlat[1, :]
+
+        for j in range(len(corners_lon)):
+                if corners_lon[j] > 180:
+                    corners_lon[j] += -360
+
+        vertices = [(corners_lon[0], corners_lat[0]), (corners_lon[1], corners_lat[1]), (corners_lon[2], corners_lat[2]),
+                    (corners_lon[3], corners_lat[3])]
+
+        square_patch = Polygon(vertices, closed=True, color='yellow', alpha=0.7)
+        patches.append(square_patch)
+
+    p = PatchCollection(patches)
+
+    if background:
+
+        bg = MAPS[cube.target_name]
+        fig, ax = bg.figure(figsize=(20, 10))
+
+    else:
+        ax = cube.plot(wav, 'equi')
+
+    ax.add_collection(p)
+
+    return ax

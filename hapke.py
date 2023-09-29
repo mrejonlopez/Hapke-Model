@@ -7,6 +7,7 @@ import shutil
 from matplotlib.patches import Polygon
 from pyvims.misc import MAPS
 from scipy.optimize import curve_fit
+from scipy.integrate import simps
 
 density_cr = 0.931
 density_am = 0.7
@@ -40,7 +41,7 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am, body='0'):
         theta_bar = ENCELADUS.theta_bar
         b = ENCELADUS.b
     elif body == 'RHEA':
-        theta_bar = RHEA.theta_bar
+        phi = RHEA.theta_bar
         b = RHEA.b
     elif body == 'IAPETUS':
         theta_bar = IAPETUS.theta_bar
@@ -61,7 +62,7 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am, body='0'):
 
     mass_fraction = 0
     b = 0.25
-    phi = 0.5
+    phi = 0.15
     theta_bar, D = parameters
     eme, inc, phase = angles
     # Calculate the modeled spectrum using Hapke model equations
@@ -99,7 +100,6 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am, body='0'):
 
 def hapke_model_mixed_mass_fraction(parameters, wav, angles, n_c, k_c, n_am, k_am, aux_param):
     """
-    :param body: icy moon to be considered
     :param parameters: to be optimized, in order filling factor, grain size and surface roughness
     :param wav: wavelength array
     :param angles: in order incidence, emergence and phase
@@ -112,7 +112,7 @@ def hapke_model_mixed_mass_fraction(parameters, wav, angles, n_c, k_c, n_am, k_a
     # Assuming you have parameters p1, p2, p3, etc.
 
     b = 0.25
-    phi = 0.5
+    phi = 0.15
     theta_bar, D = aux_param
     mass_fraction = parameters
     eme, inc, phase = angles
@@ -723,6 +723,55 @@ def crystallinity_coecient(IF,wav):
 
     return ratio
 
+def crystallinity_coecient_2(IF,wav):
+
+    index_1 = np.argmin(np.abs(wav - 1.61))
+    index_2 = np.argmin(np.abs(wav - 1.65))
+
+    ratio = IF[index_1] / IF[index_2]
+
+    return ratio
+
+def cryst_area(IF,wav):
+
+    def first_degree(w, a, b):
+        return a + b * w
+
+    wav_fit = []
+    IF_fit = []
+
+    index_1 = np.argmin(np.abs(wav - 1.5))
+    index_2 = np.argmin(np.abs(wav - 1.61))
+    index_3 = np.argmin(np.abs(wav - 1.75))
+
+    wav_fit.append(wav[index_1])
+    wav_fit.append(wav[index_2])
+    wav_fit.append(wav[index_3])
+
+    IF_fit.append(IF[index_1])
+    IF_fit.append(IF[index_2])
+    IF_fit.append(IF[index_3])
+
+    fit, covariance = curve_fit(first_degree, wav_fit, IF_fit)
+
+    min_w = 1.5
+    max_w = 1.75
+
+    wav_new = []
+    IF_new = []
+
+    for i in range(len(wav)):
+        if max(wav[0], min_w) < wav[i] < min(wav[-1], max_w):
+            wav_new.append(wav[i])
+            IF_new.append(IF[i])
+
+    y_linear_fit = first_degree(np.array(wav_new),fit[0],fit[1])
+
+    area = simps(y_linear_fit, wav_new) - simps(IF_new, wav_new)
+
+    opt = {'fit': fit, 'area': area}
+
+    return opt
 
 def cost_function_mixed_step(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, aux_param, fit_set, max_w=6):
     IF_hapke = hapke_model_mixed_step(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am,aux_param,fit_set)['IF']

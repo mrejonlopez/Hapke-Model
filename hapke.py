@@ -478,6 +478,142 @@ def fresnel_coefficient(n, k):
 ###############################################################################
 ###############################################################################
 
+def crystallinity_coecient(IF,wav):
+
+    index_1 = np.argmin(np.abs(wav - 1.2))
+    index_2 = np.argmin(np.abs(wav - 1.65))
+
+    ratio = IF[index_1] / IF[index_2]
+
+    return ratio
+
+def crystallinity_coecient_2(IF,wav):
+
+    index_1 = np.argmin(np.abs(wav - 1.61))
+    index_2 = np.argmin(np.abs(wav - 1.65))
+
+    ratio = IF[index_1] / IF[index_2]
+
+    return ratio
+
+def cryst_area(IF,wav):
+
+    def first_degree(w, a, b):
+        return a + b * w
+
+    def second_degree(w, a1, b1, c1):
+        return a1 + b1 * w + c1 * w ** 2
+
+    wav_fit = []
+    IF_fit = []
+
+    index_1 = np.argmin(np.abs(wav - 1.5))
+    index_2 = np.argmin(np.abs(wav - 1.61))
+    index_3 = np.argmin(np.abs(wav - 1.75))
+
+    wav_fit.append(wav[index_1])
+    wav_fit.append(wav[index_2])
+    wav_fit.append(wav[index_3])
+
+    IF_fit.append(IF[index_1])
+    IF_fit.append(IF[index_2])
+    IF_fit.append(IF[index_3])
+
+    fit, covariance = curve_fit(first_degree, wav_fit, IF_fit)
+
+    min_w = 1.5
+    max_w = 1.75
+
+    wav_new = []
+    IF_new = []
+
+    for i in range(len(wav)):
+        if max(wav[0], min_w) < wav[i] < min(wav[-1], max_w):
+            wav_new.append(wav[i])
+            IF_new.append(IF[i])
+
+    y_linear_fit = first_degree(np.array(wav_new),fit[0],fit[1])
+
+    area = simps(y_linear_fit, wav_new) - simps(IF_new, wav_new)
+
+    wav_2 = []
+    IF_2 = []
+
+    for i in range(len(wav)):
+        if 1.95 < wav[i] < 2.1:
+            wav_2.append(wav[i])
+            IF_2.append(IF[i])
+
+    fit2, covariance2 = curve_fit(second_degree, wav_2, IF_2)
+
+    min_loc = fit2[1] / (-2*fit2[2])
+
+    opt = {'fit': fit, 'area': area, 'loc_2': min_loc, 'fit2': fit2}
+
+    return opt
+
+def crystallinity_coecient_2(IF,wav):
+
+    index_1 = np.argmin(np.abs(wav - 1.61))
+    index_2 = np.argmin(np.abs(wav - 1.65))
+
+    ratio = IF[index_1] / IF[index_2]
+
+    return ratio
+
+def cryst_area_one_peak(IF,wav):
+
+    def first_degree(w, a, b):
+        return a + b * w
+
+    wav_fit = []
+    IF_fit = []
+
+    index_2 = np.argmin(np.abs(wav - 1.61))
+    index_3 = np.argmin(np.abs(wav - 1.75))
+
+    wav_fit.append(wav[index_2])
+    wav_fit.append(wav[index_3])
+
+    IF_fit.append(IF[index_2])
+    IF_fit.append(IF[index_3])
+
+    fit, covariance = curve_fit(first_degree, wav_fit, IF_fit)
+
+    min_w = 1.61
+    max_w = 1.75
+
+    wav_new = []
+    IF_new = []
+
+    for i in range(len(wav)):
+        if max(wav[0], min_w) < wav[i] < min(wav[-1], max_w):
+            wav_new.append(wav[i])
+            IF_new.append(IF[i])
+
+    y_linear_fit = first_degree(np.array(wav_new),fit[0],fit[1])
+
+    area = simps(y_linear_fit, wav_new) - simps(IF_new, wav_new)
+
+    opt = {'fit': fit, 'area': area}
+
+    return opt
+
+def array_mean(array,error=None):
+    arr = np.array(array)
+
+    if error is None:
+        error = 1e-10
+    else:
+        error = np.array(error)
+
+    weighted_mean = np.sum(arr / error ** 2) / np.sum(1 / error ** 2)
+
+    # Calculate the uncertainty (error) in the weighted mean
+    weighted_std_dev = 1 / np.sqrt(np.sum(1 / error ** 2))
+
+    return [weighted_mean, weighted_std_dev]
+
 def print_error_correlation(optimized_parameters):
     # FUNCTION THAT PRINTS THE CALCULATED ERRORS AND COVARIANCE MATRIX OF A FIT
 
@@ -489,20 +625,39 @@ def print_error_correlation(optimized_parameters):
     parameter_errors = np.sqrt(np.diag(cov_matrix))
 
     # Print the optimized parameter values and their errors
-    for i, value in enumerate(optimized_values):
-        print(f"Parameter {i + 1}: {value:} +/- {parameter_errors[i]:.6f}")
+    #for i, value in enumerate(optimized_values):
+        #print(f"Parameter {i + 1}: {value:} +/- {parameter_errors[i]:.6f}")
 
-    print('')
-    print('Cost = ' + str(optimized_parameters.cost))
-    print('')
+    #print('')
+    #print('Cost = ' + str(optimized_parameters.cost))
+    #print('')
     # Calculate correlation matrix
-    correlation_matrix = cov_matrix / np.outer(parameter_errors, parameter_errors)
+    #correlation_matrix = cov_matrix / np.outer(parameter_errors, parameter_errors)
 
-    print("Correlation matrix:")
-    print(correlation_matrix)
+    #print("Correlation matrix:")
+    #print(correlation_matrix)
 
     return parameter_errors
 
+def read_cube(file_path,root,download=False):
+
+    try:
+        with open(file_path, 'r') as file:
+            # Read the entire file content into a single string
+            file_contents = file.read()
+
+            # Split the string by spaces to create a list of values
+            ids = file_contents.split()
+
+    except FileNotFoundError:
+        print(f"The file '{file_path}' was not found.")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+    cube = {}
+    for id in ids:
+        cube[id] = VIMS(id, root=root,download=download)
+
+    return cube
 
 # DOWNLOAD THE CUBE AND ALLOCATE IT TO THE RIGHT FOLDER
 
@@ -633,25 +788,6 @@ def shoe_amp(w, phase, S_0):
 ###############################################################################
 ###############################################################################
 
-def cost_function(parameters, hapke_wav, angles, measured_IF, measured_wav, n_range, k_range, max_w=6):
-    IF_hapke = hapke_model(parameters, hapke_wav, angles, n_range, k_range)['IF']
-
-    interp_func_1 = interp1d(hapke_wav, IF_hapke, bounds_error=False)
-    interp_func_2 = interp1d(measured_wav, measured_IF, bounds_error=False)
-
-    wav_new = []
-
-    for i in range(len(measured_wav)):
-        if max(measured_wav[0], hapke_wav[0]) < measured_wav[i] < min(measured_wav[-1], hapke_wav[-1], max_w):
-            wav_new.append(measured_wav[i])
-
-    interpolated_hapke = interp_func_1(wav_new)
-    interpolated_lab = interp_func_2(wav_new)
-
-    difference = (interpolated_hapke - interpolated_lab) / interpolated_lab
-
-    return difference
-
 
 def cost_function_mixed_no_weight(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,
                                   min_w=0, max_w=6, body='0'):
@@ -664,26 +800,6 @@ def cost_function_mixed_no_weight(parameters, hapke_wav, angles, measured_IF, me
 
     for i in range(len(measured_wav)):
         if max(measured_wav[0], hapke_wav[0], min_w) < measured_wav[i] < min(measured_wav[-1], hapke_wav[-1], max_w):
-            wav_new.append(measured_wav[i])
-
-    interpolated_hapke = interp_func_1(wav_new)
-    interpolated_lab = interp_func_2(wav_new)
-
-    difference = (interpolated_hapke - interpolated_lab)
-
-    return difference
-
-
-def cost_function_no_weight(parameters, hapke_wav, angles, measured_IF, measured_wav, n_range, k_range, max_w=6):
-    IF_hapke = hapke_model(parameters, hapke_wav, angles, n_range, k_range)['IF']
-
-    interp_func_1 = interp1d(hapke_wav, IF_hapke, bounds_error=False)
-    interp_func_2 = interp1d(measured_wav, measured_IF, bounds_error=False)
-
-    wav_new = []
-
-    for i in range(len(measured_wav)):
-        if max(measured_wav[0], hapke_wav[0]) < measured_wav[i] < min(measured_wav[-1], hapke_wav[-1], max_w):
             wav_new.append(measured_wav[i])
 
     interpolated_hapke = interp_func_1(wav_new)
@@ -714,64 +830,7 @@ def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav
 
     return difference
 
-def crystallinity_coecient(IF,wav):
 
-    index_1 = np.argmin(np.abs(wav - 1.2))
-    index_2 = np.argmin(np.abs(wav - 1.65))
-
-    ratio = IF[index_1] / IF[index_2]
-
-    return ratio
-
-def crystallinity_coecient_2(IF,wav):
-
-    index_1 = np.argmin(np.abs(wav - 1.61))
-    index_2 = np.argmin(np.abs(wav - 1.65))
-
-    ratio = IF[index_1] / IF[index_2]
-
-    return ratio
-
-def cryst_area(IF,wav):
-
-    def first_degree(w, a, b):
-        return a + b * w
-
-    wav_fit = []
-    IF_fit = []
-
-    index_1 = np.argmin(np.abs(wav - 1.5))
-    index_2 = np.argmin(np.abs(wav - 1.61))
-    index_3 = np.argmin(np.abs(wav - 1.75))
-
-    wav_fit.append(wav[index_1])
-    wav_fit.append(wav[index_2])
-    wav_fit.append(wav[index_3])
-
-    IF_fit.append(IF[index_1])
-    IF_fit.append(IF[index_2])
-    IF_fit.append(IF[index_3])
-
-    fit, covariance = curve_fit(first_degree, wav_fit, IF_fit)
-
-    min_w = 1.5
-    max_w = 1.75
-
-    wav_new = []
-    IF_new = []
-
-    for i in range(len(wav)):
-        if max(wav[0], min_w) < wav[i] < min(wav[-1], max_w):
-            wav_new.append(wav[i])
-            IF_new.append(IF[i])
-
-    y_linear_fit = first_degree(np.array(wav_new),fit[0],fit[1])
-
-    area = simps(y_linear_fit, wav_new) - simps(IF_new, wav_new)
-
-    opt = {'fit': fit, 'area': area}
-
-    return opt
 
 def cost_function_mixed_step(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, aux_param, fit_set, max_w=6):
     IF_hapke = hapke_model_mixed_step(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am,aux_param,fit_set)['IF']
@@ -819,28 +878,6 @@ def cost_function_mixed_mass_fraction(parameters, hapke_wav, angles, measured_IF
 
     return difference
 
-def crystallinity_fit(IF, wav, min_w=1.57, max_w=1.7, normalized_wav=0):
-
-    def third_degree(w,a,b,c,d):
-        return a + b * w + c * w ** 2 + d * w ** 3
-
-    def first_degree(w,a,b):
-        return a + b + w
-
-    wav_new = []
-    IF_new = []
-
-    for i in range(len(wav)):
-        if max(wav[0], min_w) < wav[i] < min(wav[-1], max_w):
-            wav_new.append(wav[i])
-            IF_new.append(IF[i])
-
-    third_degree_fit = curve_fit(third_degree, wav, IF)
-    first_degree_fit = curve_fit(first_degree, wav, IF)
-    difference = (interpolated_hapke - interpolated_lab) / interpolated_lab
-
-    return difference
-
 class icymoons:
     def __init__(self, B_C0, freepath, B_S0, b, theta_bar, T):
         self.b_co = B_C0
@@ -870,9 +907,10 @@ IAPETUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20), 120)  # UND
 ###############################################################################
 
 def plot_pixel_equi(wav, cube, pixel_loc, background=False):
-    pixel = {}
 
+    pixel = {}
     patches = []
+
     for i in range(len(pixel_loc)):
         pixel[i] = cube @ pixel_loc[i]
 
@@ -903,3 +941,34 @@ def plot_pixel_equi(wav, cube, pixel_loc, background=False):
     ax.add_collection(p)
 
     return ax
+
+def generate_patches(patches,pixel):
+
+    corners_lon = pixel.corners.lonlat[0, :]
+    corners_lat = pixel.corners.lonlat[1, :]
+
+    for j in range(len(corners_lon)):
+        if corners_lon[j] > 180:
+            corners_lon[j] += -360
+
+    vertices = [(corners_lon[0], corners_lat[0]), (corners_lon[1], corners_lat[1]),
+                (corners_lon[2], corners_lat[2]),
+                (corners_lon[3], corners_lat[3])]
+
+    square_patch = Polygon(vertices, closed=True, color='yellow', alpha=0.7)
+
+    patches.append(square_patch)
+
+def is_micron_dip(pixel):
+
+    index = np.argmin(np.abs(pixel.wvlns - 1.25))
+
+    slope = pixel.spectrum[index] / pixel.spectrum[index-1]
+
+    if slope < 0.85:
+        aux = False
+    else:
+        aux = True
+
+    return aux
+

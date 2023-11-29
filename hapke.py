@@ -1,5 +1,8 @@
+import math
+import random
 import numpy as np
 from matplotlib.collections import PatchCollection
+from scipy import optimize
 from scipy.interpolate import interp1d
 import os
 from pyvims import VIMS
@@ -8,6 +11,8 @@ from matplotlib.patches import Polygon
 from pyvims.misc import MAPS
 from scipy.optimize import curve_fit
 from scipy.integrate import simps
+
+random.seed(11770)
 
 density_cr = 0.931
 density_am = 0.7
@@ -34,36 +39,12 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am, body='0'):
     :return:
     """
 
-    if body == 'MIMAS':
-        theta_bar = MIMAS.theta_bar
-        b = MIMAS.b
-    elif body == 'ENCELADUS':
-        theta_bar = ENCELADUS.theta_bar
-        b = ENCELADUS.b
-    elif body == 'RHEA':
-        phi = RHEA.theta_bar
-        b = RHEA.b
-    elif body == 'IAPETUS':
-        theta_bar = IAPETUS.theta_bar
-        b = IAPETUS.b
-    elif body == 'TETHYS':
-        theta_bar = TETHYS.theta_bar
-        b = TETHYS.b
-    elif body == 'DIONE':
-        theta_bar = DIONE.theta_bar
-        b = DIONE.b
-    else:
-        #print('NO BODY IDENTIFIED, ARBITRARY VALUES OF b AND ROUGHNESS')
-        unbarquitodevela = 1
-        #theta_bar = np.deg2rad(5)
-        #b = 0.2
-    # Unpack the parameters
-    # Assuming you have parameters p1, p2, p3, etc.
-
     mass_fraction = 0
-    b = 0.25
-    phi = 0.15
+    b = 0.3
+    phi = 0.4
+    #theta_bar = np.deg2rad(25)
     theta_bar, D = parameters
+
     eme, inc, phase = angles
     # Calculate the modeled spectrum using Hapke model equations
     psi = phasetoazimuth(phase, eme, inc)
@@ -98,6 +79,123 @@ def hapke_model_mixed(parameters, wav, angles, n_c, k_c, n_am, k_am, body='0'):
 
     return output
 
+def hapke_model_mixed_b(parameters, wav, angles, n_c, k_c, n_am, k_am, b):
+    """
+    :param body: icy moon to be considered
+    :param parameters: to be optimized, in order filling factor, grain size and surface roughness
+    :param wav: wavelength array
+    :param angles: in order incidence, emergence and phase
+    :param n_c & n_am: n array of crystalline and amorphous ice
+    :param k_c & k_am: k array of crystalline and amorphous ice
+    :return:
+    """
+
+    mass_fraction = 0
+
+    phi = 0.4
+    #theta_bar = np.deg2rad(25)
+    theta_bar, D = parameters
+
+    eme, inc, phase = angles
+    # Calculate the modeled spectrum using Hapke model equations
+    psi = phasetoazimuth(phase, eme, inc)
+    w_c = singlescatteringalbedo(n_c, k_c, wav, D)
+    w_am = singlescatteringalbedo(n_am, k_am, wav, D)
+
+    c = hockey_stick(b)
+    p = phase_function(b, c, phase)
+
+    R0_c = fresnel_coefficient(n_c, k_c)
+    R0_am = fresnel_coefficient(n_am, k_am)
+
+    B_S0 = shoe_amp_mix(mass_fraction, wav, wav, p, p, R0_c, R0_am)
+
+    K = porosityparameter(phi)
+
+    B_SH = shoe(B_S0, phi, phase)
+
+    [mu_0e, mu_e, S] = shadowingfunction(inc, eme, psi, theta_bar)
+
+    w = singlescatteringalbedomixed(mass_fraction, w_c, w_am)
+
+    r = np.empty(len(wav))
+
+    for i in range(len(wav)):
+        r[i] = (K * w[i] / (4 * np.pi) * mu_0e / (mu_0e + mu_e) * (
+                p * B_SH[i] + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * S)
+
+    IF = r * np.pi
+
+    output = {'r': r, 'IF': IF, 'w': w, 'p': p}
+
+    return output
+
+
+def hapke_model_mixed_phi(parameters, wav, angles, n_c, k_c, n_am, k_am, phi):
+    """
+    :param body: icy moon to be considered
+    :param parameters: to be optimized, in order filling factor, grain size and surface roughness
+    :param wav: wavelength array
+    :param angles: in order incidence, emergence and phase
+    :param n_c & n_am: n array of crystalline and amorphous ice
+    :param k_c & k_am: k array of crystalline and amorphous ice
+    :return:
+    """
+
+    mass_fraction = 0
+    b = 0.3
+
+    # theta_bar = np.deg2rad(25)
+    theta_bar, D = parameters
+
+    eme, inc, phase = angles
+    # Calculate the modeled spectrum using Hapke model equations
+    psi = phasetoazimuth(phase, eme, inc)
+    w_c = singlescatteringalbedo(n_c, k_c, wav, D)
+    w_am = singlescatteringalbedo(n_am, k_am, wav, D)
+
+    c = hockey_stick(b)
+    p = phase_function(b, c, phase)
+
+    R0_c = fresnel_coefficient(n_c, k_c)
+    R0_am = fresnel_coefficient(n_am, k_am)
+
+    B_S0 = shoe_amp_mix(mass_fraction, wav, wav, p, p, R0_c, R0_am)
+
+    K = porosityparameter(phi)
+
+    B_SH = shoe(B_S0, phi, phase)
+
+    [mu_0e, mu_e, S] = shadowingfunction(inc, eme, psi, theta_bar)
+
+    w = singlescatteringalbedomixed(mass_fraction, w_c, w_am)
+
+    r = np.empty(len(wav))
+
+    for i in range(len(wav)):
+        r[i] = (K * w[i] / (4 * np.pi) * mu_0e / (mu_0e + mu_e) * (
+                p * B_SH[i] + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * S)
+
+    IF = r * np.pi
+
+    output = {'r': r, 'IF': IF, 'w': w, 'p': p}
+
+    return output
+
+def loc_to_m(loc2,loc2_err):
+    slope = -0.01735
+    slope_error = 0.00018
+    intercept = 2.0294
+    intercept_error = 0.0001
+
+    x = (loc2 - intercept) / slope
+
+    # Calculate the total uncertainty in x using error propagation
+    x_error = np.sqrt((loc2_err / slope) ** 2 + ((intercept - loc2) / slope ** 2) ** 2 * slope_error ** 2 + (
+                intercept_error / slope) ** 2)
+
+    return [x,x_error]
+
 def hapke_model_mixed_mass_fraction(parameters, wav, angles, n_c, k_c, n_am, k_am, aux_param):
     """
     :param parameters: to be optimized, in order filling factor, grain size and surface roughness
@@ -111,8 +209,8 @@ def hapke_model_mixed_mass_fraction(parameters, wav, angles, n_c, k_c, n_am, k_a
     # Unpack the parameters
     # Assuming you have parameters p1, p2, p3, etc.
 
-    b = 0.25
-    phi = 0.15
+    b = 0.3
+    phi = 0.4
     theta_bar, D = aux_param
     mass_fraction = parameters
     eme, inc, phase = angles
@@ -148,60 +246,6 @@ def hapke_model_mixed_mass_fraction(parameters, wav, angles, n_c, k_c, n_am, k_a
     output = {'r': r, 'IF': IF, 'w': w, 'p': p}
 
     return output
-
-
-def hapke_model_mixed_step(parameters, wav, angles, n_c, k_c, n_am, k_am, aux_param, fit_set=0):
-    """
-    :param body: icy moon to be considered
-    :param parameters: to be optimized, in order filling factor, grain size and surface roughness
-    :param wav: wavelength array
-    :param angles: in order incidence, emergence and phase
-    :param n_c & n_am: n array of crystalline and amorphous ice
-    :param k_c & k_am: k array of crystalline and amorphous ice
-    :return:
-    """
-    mass_fraction = 0
-    if fit_set == 0:
-        b, theta_bar = parameters
-        phi, D = aux_param
-    else:
-        b, theta_bar = aux_param
-        phi, D = parameters
-
-    eme, inc, phase = angles
-    # Calculate the modeled spectrum using Hapke model equations
-    psi = phasetoazimuth(phase, eme, inc)
-    w_c = singlescatteringalbedo(n_c, k_c, wav, D)
-    w_am = singlescatteringalbedo(n_am, k_am, wav, D)
-
-    c = hockey_stick(b)
-    p = phase_function(b, c, phase)
-
-    R0_c = fresnel_coefficient(n_c, k_c)
-    R0_am = fresnel_coefficient(n_am, k_am)
-
-    B_S0 = shoe_amp_mix(mass_fraction, wav, wav, p, p, R0_c, R0_am)
-
-    K = porosityparameter(phi)
-
-    B_SH = shoe(B_S0, phi, phase)
-
-    [mu_0e, mu_e, S] = shadowingfunction(inc, eme, psi, theta_bar)
-
-    w = singlescatteringalbedomixed(mass_fraction, w_c, w_am)
-
-    r = np.empty(len(wav))
-
-    for i in range(len(wav)):
-        r[i] = (K * w[i] / (4 * np.pi) * mu_0e / (mu_0e + mu_e) * (
-                p * B_SH[i] + H(w[i], mu_0e) * H(w[i], mu_e) - 1) * S)
-
-    IF = r * np.pi
-
-    output = {'r': r, 'IF': IF, 'w': w, 'p': p}
-
-    return output
-
 
 def hapke_model(parameters, wav, angles, n_range, k_range):
     """
@@ -478,8 +522,7 @@ def fresnel_coefficient(n, k):
 ###############################################################################
 ###############################################################################
 
-def crystallinity_coecient(IF,wav):
-
+def crystallinity_coecient(IF, wav):
     index_1 = np.argmin(np.abs(wav - 1.2))
     index_2 = np.argmin(np.abs(wav - 1.65))
 
@@ -487,22 +530,13 @@ def crystallinity_coecient(IF,wav):
 
     return ratio
 
-def crystallinity_coecient_2(IF,wav):
 
-    index_1 = np.argmin(np.abs(wav - 1.61))
-    index_2 = np.argmin(np.abs(wav - 1.65))
-
-    ratio = IF[index_1] / IF[index_2]
-
-    return ratio
-
-def cryst_area(IF,wav):
-
+def cryst_area(IF, wav):
     def first_degree(w, a, b):
         return a + b * w
 
     def second_degree(w, a1, b1, c1):
-        return a1 + b1 * w + c1 * w ** 2
+        return a1 * w ** 2 + b1 * w + c1
 
     wav_fit = []
     IF_fit = []
@@ -532,7 +566,7 @@ def cryst_area(IF,wav):
             wav_new.append(wav[i])
             IF_new.append(IF[i])
 
-    y_linear_fit = first_degree(np.array(wav_new),fit[0],fit[1])
+    y_linear_fit = first_degree(np.array(wav_new), fit[0], fit[1])
 
     area = simps(y_linear_fit, wav_new) - simps(IF_new, wav_new)
 
@@ -544,25 +578,55 @@ def cryst_area(IF,wav):
             wav_2.append(wav[i])
             IF_2.append(IF[i])
 
-    fit2, covariance2 = curve_fit(second_degree, wav_2, IF_2)
+    def gaussian(x, A, mu, sigma, baseline):
+        return A * np.exp(-(x - mu)**2 / (2 * sigma**2)) + baseline
 
-    min_loc = fit2[1] / (-2*fit2[2])
+    try:
 
-    opt = {'fit': fit, 'area': area, 'loc_2': min_loc, 'fit2': fit2}
+        wav_2 = []
+        IF_2 = []
+
+        for i in range(len(wav)):
+            if 1.91 < wav[i] < 2.14:
+                wav_2.append(wav[i])
+                IF_2.append(IF[i])
+
+        params, covariance = curve_fit(gaussian, wav_2, IF_2, p0=[-0.6, 2, 0.1, 1],maxfev=10000)
+
+        # Extract the fitted parameters
+        A_fit, mu_fit, sigma_fit, baseline_fit = params
+
+        # Calculate the error for the fit
+        fit_errors = np.sqrt(np.diag(covariance))
+        A_error, mu_error, sigma_error, baseline_error = fit_errors
+
+    except RuntimeError:
+    # Handle the exception when a RuntimeError occurs
+        print("Error: Expanding Fit area to 1.91-2.14")
+
+        wav_2 = []
+        IF_2 = []
+
+        for i in range(len(wav)):
+            if 1.91 < wav[i] < 2.14:
+                wav_2.append(wav[i])
+                IF_2.append(IF[i])
+
+        params, covariance = curve_fit(gaussian, wav_2, IF_2, p0=[-0.6, 2, 0.1, 1], maxfev=10000)
+
+        # Extract the fitted parameters
+        A_fit, mu_fit, sigma_fit, baseline_fit = params
+
+        # Calculate the error for the fit
+        fit_errors = np.sqrt(np.diag(covariance))
+        A_error, mu_error, sigma_error, baseline_error = fit_errors
+
+    opt = {'fit': fit, 'area': area, 'loc_2': [mu_fit, mu_error], 'fit2': params}
 
     return opt
 
-def crystallinity_coecient_2(IF,wav):
 
-    index_1 = np.argmin(np.abs(wav - 1.61))
-    index_2 = np.argmin(np.abs(wav - 1.65))
-
-    ratio = IF[index_1] / IF[index_2]
-
-    return ratio
-
-def cryst_area_one_peak(IF,wav):
-
+def cryst_area_one_peak(IF, wav):
     def first_degree(w, a, b):
         return a + b * w
 
@@ -591,7 +655,7 @@ def cryst_area_one_peak(IF,wav):
             wav_new.append(wav[i])
             IF_new.append(IF[i])
 
-    y_linear_fit = first_degree(np.array(wav_new),fit[0],fit[1])
+    y_linear_fit = first_degree(np.array(wav_new), fit[0], fit[1])
 
     area = simps(y_linear_fit, wav_new) - simps(IF_new, wav_new)
 
@@ -599,20 +663,22 @@ def cryst_area_one_peak(IF,wav):
 
     return opt
 
-def array_mean(array,error=None):
+
+def array_mean(array, error=None):
     arr = np.array(array)
 
     if error is None:
-        error = 1e-10
+        n = len(array)
+        mean = np.sum(arr) / n
+        sample_std_dev = np.sqrt(np.sum((arr - mean) ** 2) / (n - 1))
+        mean_error = sample_std_dev / np.sqrt(n)
     else:
         error = np.array(error)
+        mean = np.sum(arr / error ** 2) / np.sum(1 / error ** 2)
+        mean_error = 1 / np.sqrt(np.sum(1 / error ** 2))
 
-    weighted_mean = np.sum(arr / error ** 2) / np.sum(1 / error ** 2)
+    return [mean, mean_error]
 
-    # Calculate the uncertainty (error) in the weighted mean
-    weighted_std_dev = 1 / np.sqrt(np.sum(1 / error ** 2))
-
-    return [weighted_mean, weighted_std_dev]
 
 def print_error_correlation(optimized_parameters):
     # FUNCTION THAT PRINTS THE CALCULATED ERRORS AND COVARIANCE MATRIX OF A FIT
@@ -625,22 +691,24 @@ def print_error_correlation(optimized_parameters):
     parameter_errors = np.sqrt(np.diag(cov_matrix))
 
     # Print the optimized parameter values and their errors
-    #for i, value in enumerate(optimized_values):
-        #print(f"Parameter {i + 1}: {value:} +/- {parameter_errors[i]:.6f}")
+    # for i, value in enumerate(optimized_values):
+    # print(f"Parameter {i + 1}: {value:} +/- {parameter_errors[i]:.6f}")
 
-    #print('')
-    #print('Cost = ' + str(optimized_parameters.cost))
-    #print('')
+    # print('')
+    # print('Cost = ' + str(optimized_parameters.cost))
+    # print('')
     # Calculate correlation matrix
-    #correlation_matrix = cov_matrix / np.outer(parameter_errors, parameter_errors)
+    correlation_matrix = cov_matrix / np.outer(parameter_errors, parameter_errors)
 
-    #print("Correlation matrix:")
-    #print(correlation_matrix)
+    print("Correlation matrix:")
+    print(correlation_matrix)
+    #print("Eigenvalues:")
+    #print(np.linalg.eigvals(correlation_matrix))
 
     return parameter_errors
 
-def read_cube(file_path,root,download=False):
 
+def read_cube(file_path, root, download=False):
     try:
         with open(file_path, 'r') as file:
             # Read the entire file content into a single string
@@ -655,9 +723,10 @@ def read_cube(file_path,root,download=False):
         print(f"An error occurred: {str(e)}")
     cube = {}
     for id in ids:
-        cube[id] = VIMS(id, root=root,download=download)
+        cube[id] = VIMS(id, root=root, download=download)
 
     return cube
+
 
 # DOWNLOAD THE CUBE AND ALLOCATE IT TO THE RIGHT FOLDER
 
@@ -719,7 +788,6 @@ def inter_optical_constants(wav_c, wav_am, n_c, k_c):
 
     return opt
 
-
 ###############################################################################
 ###############################################################################
 ###############################################################################
@@ -727,7 +795,6 @@ def inter_optical_constants(wav_c, wav_am, n_c, k_c):
 ###############################################################################
 ###############################################################################
 ###############################################################################
-
 
 def singlescatteringalbedomixed(massfraction_am, w_c, w_am):
     """
@@ -770,7 +837,6 @@ def shoe_amp_mix(massfraction_am, w_c, w_am, phase_c, phase_am, S_c, S_am):
 
     return b_s0
 
-
 def shoe_amp(w, phase, S_0):
     b_s0 = np.empty(len(w))
 
@@ -779,7 +845,6 @@ def shoe_amp(w, phase, S_0):
 
     return b_s0
 
-
 ###############################################################################
 ###############################################################################
 ###############################################################################
@@ -787,6 +852,181 @@ def shoe_amp(w, phase, S_0):
 ###############################################################################
 ###############################################################################
 ###############################################################################
+
+def random_fit(n_fits, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am):
+    fit_D = []
+    fit_theta = []
+    cost = []
+    param_aux = {}
+    bounds = ([0,0.000001], [np.deg2rad(90),0.001], )
+
+    fits = {}
+
+    for i in range(n_fits):
+        # print('Fit: ' + str(i) + '/' + str(n_fits))
+
+        param = [random.uniform(0.0001, np.deg2rad(90)), random.uniform(0.000001, 0.001)]
+        param_aux[i] = param
+        fits[i] = optimize.least_squares(
+            cost_function_mixed, param,
+            args=(hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, 0, 2.75), bounds=bounds,
+        )
+
+        fit_theta.append(fits[i].x[0])
+        fit_D.append(fits[i].x[1])
+        cost.append(fits[i].cost)
+
+    dif = [max(fit_theta) - min(fit_theta), max(fit_D) - min(fit_D), max(cost) - min(cost)]
+    dif_theta = (max(fit_theta) - min(fit_theta)) / max(fit_theta)
+    dif_D = (max(fit_D) - min(fit_D)) / max(fit_D)
+    dif_cost = (max(cost) - min(cost)) / max(cost)
+
+    clusters = 1  # Initialize with the first cluster.
+    sorted_cost = sorted(cost)
+
+    for i in range(1, len(sorted_cost)):
+        if (sorted_cost[i] - sorted_cost[i - 1]) / sorted_cost[0] > 0.01:
+            clusters += 1
+
+    index_of_lowest_value = cost.index(min(cost))
+    print(sorted_cost)
+    print(dif)
+    if dif_theta < 0.01 and dif_D < 0.01 and dif_cost < 0.01:
+        return {'dif': dif, 'fit': fits[0], 'n_sol': clusters, 'Unique': True}
+    else:
+        return {'dif': dif, 'fit': fits[index_of_lowest_value], 'n_sol': clusters, 'Unique': False}
+
+def random_fit_b(n_fits, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,b):
+    fit_D = []
+    fit_theta = []
+    cost = []
+    param_aux = {}
+    bounds = ([0,0.000001], [np.deg2rad(90),0.001], )
+
+    fits = {}
+
+    for i in range(n_fits):
+        # print('Fit: ' + str(i) + '/' + str(n_fits))
+
+        param = [random.uniform(0.0001, np.deg2rad(90)), random.uniform(0.000001, 0.001)]
+        param_aux[i] = param
+        fits[i] = optimize.least_squares(
+            cost_function_mixed_b, param,
+            args=(hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,b, 0, 2.75), bounds=bounds,
+        )
+
+        fit_theta.append(fits[i].x[0])
+        fit_D.append(fits[i].x[1])
+        cost.append(fits[i].cost)
+
+    dif = [max(fit_theta) - min(fit_theta), max(fit_D) - min(fit_D), max(cost) - min(cost)]
+    dif_theta = (max(fit_theta) - min(fit_theta)) / max(fit_theta)
+    dif_D = (max(fit_D) - min(fit_D)) / max(fit_D)
+    dif_cost = (max(cost) - min(cost)) / max(cost)
+
+    clusters = 1  # Initialize with the first cluster.
+    sorted_cost = sorted(cost)
+
+    for i in range(1, len(sorted_cost)):
+        if (sorted_cost[i] - sorted_cost[i - 1]) / sorted_cost[0] > 0.01:
+            clusters += 1
+
+    index_of_lowest_value = cost.index(min(cost))
+    print(sorted_cost)
+    print(dif)
+    if dif_theta < 0.01 and dif_D < 0.01 and dif_cost < 0.01:
+        return {'dif': dif, 'fit': fits[0], 'n_sol': clusters, 'Unique': True}
+    else:
+        return {'dif': dif, 'fit': fits[index_of_lowest_value], 'n_sol': clusters, 'Unique': False}
+
+
+def random_fit_phi(n_fits, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,phi):
+    fit_D = []
+    fit_theta = []
+    cost = []
+    param_aux = {}
+    bounds = ([0,0.000001], [np.deg2rad(90),0.001], )
+
+    fits = {}
+
+    for i in range(n_fits):
+        # print('Fit: ' + str(i) + '/' + str(n_fits))
+
+        param = [random.uniform(0.0001, np.deg2rad(90)), random.uniform(0.000001, 0.001)]
+        param_aux[i] = param
+        fits[i] = optimize.least_squares(
+            cost_function_mixed_phi, param,
+            args=(hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,phi, 0, 2.75), bounds=bounds,
+        )
+
+        fit_theta.append(fits[i].x[0])
+        fit_D.append(fits[i].x[1])
+        cost.append(fits[i].cost)
+
+    dif = [max(fit_theta) - min(fit_theta), max(fit_D) - min(fit_D), max(cost) - min(cost)]
+    dif_theta = (max(fit_theta) - min(fit_theta)) / max(fit_theta)
+    dif_D = (max(fit_D) - min(fit_D)) / max(fit_D)
+    dif_cost = (max(cost) - min(cost)) / max(cost)
+
+    clusters = 1  # Initialize with the first cluster.
+    sorted_cost = sorted(cost)
+
+    for i in range(1, len(sorted_cost)):
+        if (sorted_cost[i] - sorted_cost[i - 1]) / sorted_cost[0] > 0.01:
+            clusters += 1
+
+    index_of_lowest_value = cost.index(min(cost))
+    print(sorted_cost)
+    print(dif)
+    if dif_theta < 0.01 and dif_D < 0.01 and dif_cost < 0.01:
+        return {'dif': dif, 'fit': fits[0], 'n_sol': clusters, 'Unique': True}
+    else:
+        return {'dif': dif, 'fit': fits[index_of_lowest_value], 'n_sol': clusters, 'Unique': False}
+
+
+def random_fit_norm(n_fits, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am):
+    fit_D = []
+    fit_theta = []
+    cost = []
+    param_aux = {}
+    bounds = ([0,0,0,0.000001], [1,np.deg2rad(45),0.74,0.001], )
+
+    fits = {}
+
+    for i in range(n_fits):
+        # print('Fit: ' + str(i) + '/' + str(n_fits))
+        param = [random.uniform(0.0001, 0.999), random.uniform(0.0001, np.deg2rad(45)), random.uniform(0.0001, 0.74),
+                 random.uniform(0.000001, 0.001)]
+        param_aux[i] = param
+        fits[i] = optimize.least_squares(
+            cost_function_mixed_no_weight, param,
+            args=(hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, 0, 2.75), bounds=bounds,
+        )
+
+        fit_theta.append(fits[i].x[0])
+        fit_D.append(fits[i].x[1])
+
+        cost.append(fits[i].cost)
+
+    dif = [max(fit_theta) - min(fit_theta), max(fit_D) - min(fit_D), max(cost) - min(cost)]
+    dif_theta = (max(fit_theta) - min(fit_theta)) / max(fit_theta)
+    dif_D = (max(fit_D) - min(fit_D)) / max(fit_D)
+    dif_cost = (max(cost) - min(cost)) / max(cost)
+
+    clusters = 1  # Initialize with the first cluster.
+    sorted_cost = sorted(cost)
+
+    for i in range(1, len(sorted_cost)):
+        if (sorted_cost[i] - sorted_cost[i - 1]) / sorted_cost[0] > 0.01:
+            clusters += 1
+
+    index_of_lowest_value = cost.index(min(cost))
+    print(sorted_cost)
+    print(dif)
+    if dif_theta < 0.01 and dif_D < 0.01 and dif_cost < 0.01:
+        return {'dif': dif, 'fit': fits[0], 'n_sol': clusters, 'Unique': True}
+    else:
+        return {'dif': dif, 'fit': fits[index_of_lowest_value], 'n_sol': clusters, 'Unique': False}
 
 
 def cost_function_mixed_no_weight(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,
@@ -809,10 +1049,9 @@ def cost_function_mixed_no_weight(parameters, hapke_wav, angles, measured_IF, me
 
     return difference
 
-
-def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, min_wav=0,max_w=6):
+def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, min_wav=0,
+                        max_w=6):
     IF_hapke = hapke_model_mixed(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am)['IF']
-
 
     interp_func_1 = interp1d(hapke_wav, IF_hapke, bounds_error=False)
     interp_func_2 = interp1d(measured_wav, measured_IF, bounds_error=False)
@@ -827,32 +1066,15 @@ def cost_function_mixed(parameters, hapke_wav, angles, measured_IF, measured_wav
     interpolated_lab = interp_func_2(wav_new)
 
     difference = (interpolated_hapke - interpolated_lab) / interpolated_lab
-
+    #plot_param['cost'].append(np.linalg.norm(difference))
+    #plot_param['D'].append(parameters[1])
+    #plot_param['theta'].append(parameters[0])
+    #print(np.linalg.norm(difference))
     return difference
 
-
-
-def cost_function_mixed_step(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, aux_param, fit_set, max_w=6):
-    IF_hapke = hapke_model_mixed_step(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am,aux_param,fit_set)['IF']
-
-    interp_func_1 = interp1d(hapke_wav, IF_hapke, bounds_error=False)
-    interp_func_2 = interp1d(measured_wav, measured_IF, bounds_error=False)
-
-    wav_new = []
-
-    for i in range(len(measured_wav)):
-        if max(measured_wav[0], hapke_wav[0]) < measured_wav[i] < min(measured_wav[-1], hapke_wav[-1], max_w):
-            wav_new.append(measured_wav[i])
-
-    interpolated_hapke = interp_func_1(wav_new)
-    interpolated_lab = interp_func_2(wav_new)
-
-    difference = (interpolated_hapke - interpolated_lab) / interpolated_lab
-
-    return difference
-
-def cost_function_mixed_mass_fraction(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am, aux_param,min_w=1.57, max_w=1.7, normalized_wav=0):
-    IF_hapke = hapke_model_mixed_mass_fraction(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am,aux_param)['IF']
+def cost_function_mixed_mass_fraction(parameters, hapke_wav, angles, measured_IF, measured_wav, n_c, k_c, n_am, k_am,
+                                      aux_param, min_w=1.57, max_w=1.7, normalized_wav=0):
+    IF_hapke = hapke_model_mixed_mass_fraction(parameters, hapke_wav, angles, n_c, k_c, n_am, k_am, aux_param)['IF']
 
     interp_func_1 = interp1d(hapke_wav, IF_hapke, bounds_error=False)
     interp_func_2 = interp1d(measured_wav, measured_IF, bounds_error=False)
@@ -878,25 +1100,6 @@ def cost_function_mixed_mass_fraction(parameters, hapke_wav, angles, measured_IF
 
     return difference
 
-class icymoons:
-    def __init__(self, B_C0, freepath, B_S0, b, theta_bar, T):
-        self.b_co = B_C0
-        self.freepath = freepath
-        self.B_S0 = B_S0
-        self.b = b
-        self.theta_bar = theta_bar
-        self.T = T
-
-
-# DEFINITION OF THE ATTRIBUTES OF THE ICY MOONS - BOOK ENCELADUS AND THE ICY MOONS: SURFACE PROPERTIES
-
-MIMAS = icymoons(0.31, 19 * 10 ** (-6), 0.53, 0.175, np.deg2rad(30), 80)
-ENCELADUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.1, np.deg2rad(21), 80)
-TETHYS = icymoons(0.32, 109 * 10 ** (-6), 0.53, 0.25, np.deg2rad(23), 60)
-DIONE = icymoons(0.32, 11 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20), 100)  # UNDETERMINED
-RHEA = icymoons(0.33, 31 * 10 ** (-6), 0.53, 0.45, np.deg2rad(15), 120)  # AVERAGE OF 3 VALUES
-IAPETUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20), 120)  # UNDETERMINED
-
 
 ###############################################################################
 ###############################################################################
@@ -907,7 +1110,6 @@ IAPETUS = icymoons(0.35, 33 * 10 ** (-6), 0.53, 0.2, np.deg2rad(20), 120)  # UND
 ###############################################################################
 
 def plot_pixel_equi(wav, cube, pixel_loc, background=False):
-
     pixel = {}
     patches = []
 
@@ -942,8 +1144,8 @@ def plot_pixel_equi(wav, cube, pixel_loc, background=False):
 
     return ax
 
-def generate_patches(patches,pixel):
 
+def generate_patches(patches, pixel):
     corners_lon = pixel.corners.lonlat[0, :]
     corners_lat = pixel.corners.lonlat[1, :]
 
@@ -955,20 +1157,19 @@ def generate_patches(patches,pixel):
                 (corners_lon[2], corners_lat[2]),
                 (corners_lon[3], corners_lat[3])]
 
-    square_patch = Polygon(vertices, closed=True, color='yellow', alpha=0.7)
+    square_patch = Polygon(vertices, closed=True, alpha=0.7)
 
     patches.append(square_patch)
 
-def is_micron_dip(pixel):
 
+def is_micron_dip(pixel):
     index = np.argmin(np.abs(pixel.wvlns - 1.25))
 
-    slope = pixel.spectrum[index] / pixel.spectrum[index-1]
+    slope = pixel.spectrum[index] / pixel.spectrum[index - 1]
 
-    if slope < 0.85:
+    if slope < 0.9:
         aux = False
     else:
         aux = True
 
     return aux
-
